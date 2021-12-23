@@ -1,4 +1,5 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, htmlToMarkdown } from 'obsidian';
+import * as fs from 'fs/promises';
 
 // Remember to rename these classes and interfaces!
 const GS_OBSIDIAN_FOLDER = "assetsLocation";
@@ -107,7 +108,7 @@ export default class ImportFoundry extends Plugin {
 		let src  = this.settings[GS_FOUNDRY_WORLD];    // TFolder
 		let dest = this.settings[GS_OBSIDIAN_FOLDER];  // TFolder
 		
-		await app.vault.createFolder(dest).catch(er => console.error(`Destination '${dest}' already exists`));
+		await app.vault.createFolder(dest).catch(er => console.log(`Destination '${dest}' already exists`));
 		
         let contents = await file.text().catch(er => console.error(`Failed to read file ${file.path} due to ${er}`));
 		
@@ -122,7 +123,6 @@ export default class ImportFoundry extends Plugin {
 		let map = {};
 		for (let item of entries) {
 			map[item._id] = item.filename;
-			console.log(`Adding ${item._id} for ${item.filename} to map`);
 		}
 		
 		function convert(str, id, label) {
@@ -133,13 +133,77 @@ export default class ImportFoundry extends Plugin {
 				return `[[${filename}|${label}]]`;
 		}
 		
+		function findFirstDiffPos(a, b) {
+			var i = 0;
+			if (a === b) return -1;
+			while (a[i] === b[i]) i++;
+			return i;
+		}
+
+		// Path up to, but not including "worlds\"  (it uses \ not /)
+		let fileprefix = file.path.slice(0, file.path.indexOf('worlds\\'));
+		
+		let filestomove = [];
+		let destForImages = dest + "/images";
+		
+		function fileconvert(str, filename) {
+			// See if we can grab the file.
+			console.log(`fileconvert for '${filename}'`);
+			if (filename.startsWith("data:image")) {
+				console.log(`Ignoring image file ${filename}`);
+				return str;
+			}
+			let pos = filename.lastIndexOf('/');
+			if (pos < 0 || !filename.startsWith('worlds/')) {
+				console.log(`No path in file '${filename}'`);
+				return str;
+			}
+
+			// filename = "worlds/cthulhu/realmworksimport/sdfdsfrs.png"
+			// basename = ".../worlds/cthulhu/data/journal.db"
+			let basefilename = filename.slice(filename.lastIndexOf('/') + 1);
+			filestomove.push( {
+				srcfile: fileprefix + filename,
+				dstfile: destForImages + '/' + basefilename
+				});
+			return `![[${basefilename}]]`;
+		}
+		
 		// Replace @JournalEntry[id]{label} with [[filename-for-id]](label)
 		for (let item of entries) {
-			let pattern = /@JournalEntry\[([^\]]*)\]{([^\}]*)}/g;
+			// Replace Journal Links
 			if (item.markdown.includes('@JournalEntry')) {
+				const pattern = /@JournalEntry\[([^\]]*)\]{([^\}]*)}/g;
 				//console.log(`Replacing @JournalEntry in\n${item.markdown}`);
 				item.markdown = item.markdown.replaceAll(pattern, convert);
 				//console.log(`It became\n${item.markdown}`);
+			}
+			// Replace file references
+			if (item.markdown.includes('![](')) {
+				console.log(`File ${item.filename} has images`);
+				const filepattern = /!\[\]\(([^)]*)\)/g;
+				item.markdown = item.markdown.replaceAll(filepattern, await fileconvert);
+			}
+		}
+		
+		// Maybe create subfolder for images
+		if (filestomove.length > 0) {
+			await app.vault.createFolder(destForImages).catch(er => console.log(`Destination '${dest}' already exists`));
+		}
+		
+		// Move all the files that fileconvert found (if any)
+		for (let item of filestomove) {
+			const infile = await fs.open(item.srcfile);
+			let body = await infile.readFile().catch(er => console.error(`Failed to read ${item.srcfile} due to ${er}`));
+			if (body) {
+				//console.log(`Copying file to ${item.dstfile}`);
+						
+				// Since we can't overwrite, delete the file if it already exists.
+				let exist = app.vault.getAbstractFileByPath(item.dstfile);
+				if (exist) app.vault.delete(exist);
+
+				// Now write the image.
+				await app.vault.create(item.dstfile, body);
 			}
 		}
 		
@@ -152,6 +216,7 @@ export default class ImportFoundry extends Plugin {
 			let exist = app.vault.getAbstractFileByPath(outfilename);
 			if (exist) app.vault.delete(exist);
 			
+			//console.log(`Creating Note ${outfilename}`);
 			await app.vault.create(outfilename, item.markdown); //.then(file => new Notice(`Created note ${file.path}`));
 		}
 		new Notice(`Import finished`);
