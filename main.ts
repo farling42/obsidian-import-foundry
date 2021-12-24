@@ -137,7 +137,7 @@ export default class ImportFoundry extends Plugin {
 		}
 
 		// Path up to, but not including "worlds\"  (it uses \ not /)
-		let fileprefix = file.path.slice(0, file.path.indexOf('worlds\\'));
+		let foundryuserdata = file.path.slice(0, file.path.indexOf('worlds\\'));
 		
 		let filestomove = [];
 		let destForImages = dest + "/images";
@@ -145,21 +145,19 @@ export default class ImportFoundry extends Plugin {
 		function fileconvert(str, filename) {
 			// See if we can grab the file.
 			console.log(`fileconvert for '${filename}'`);
-			if (filename.startsWith("data:image") || filename.startsWith("http:" || filename.startsWith("https:"))) {
+			if (filename.startsWith("data:image") || filename.contains(":")) {
+				// e.g.
+				// http://URL
+				// https://URL
+				// data:image;inline binary
 				console.log(`Ignoring image file/external URL: ${filename}`);
 				return str;
 			}
-			let pos = filename.lastIndexOf('/');
-			if (pos < 0 || !filename.startsWith('worlds/')) {
-				console.log(`No path in file '${filename}'`);
-				return str;
-			}
-
 			// filename = "worlds/cthulhu/realmworksimport/sdfdsfrs.png"
 			// basename = ".../worlds/cthulhu/data/journal.db"
 			let basefilename = filename.slice(filename.lastIndexOf('/') + 1);
 			filestomove.push( {
-				srcfile: fileprefix + filename,
+				srcfile: foundryuserdata + filename,
 				dstfile: destForImages + '/' + basefilename
 				});
 			return `![[${basefilename}]]`;
