@@ -27,55 +27,9 @@ export default class ImportFoundry extends Plugin {
 		});
 		// Perform additional things with the ribbon
 		ribbonIconEl.addClass('import-foundry-ribbon-class');
-/*
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-import-foundry-modal-simple',
-			name: 'Open import-foundry modal (simple)',
-			callback: () => {
-				new ImportFoundryModel(this.app).open();
-			}
-		});
-
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'import-foundry-editor-command',
-			name: 'import-foundry editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('import-foundry Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-import-foundry-modal-complex',
-			name: 'Open import-foundry modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new ImportFoundryModel(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-*/
+		
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new ImportFoundrySettingTab(this.app, this));
-/*
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-*/		
 	}
 
 	onunload() {
@@ -89,7 +43,7 @@ export default class ImportFoundry extends Plugin {
 		await this.saveData(this.settings);
 	}
 	
-	validName(name) {
+	validFilename(name) {
 		const regexp = /[<>:"/\\|?\*]/;
 		return name.replace(regexp,'_');
 	}
@@ -101,10 +55,44 @@ export default class ImportFoundry extends Plugin {
 			return;
 		}
 		let notice = new Notice(`Starting import`, 0);
-		// Read the next Journal Entry
+
+		// The base folder for the import
 		let dest = this.settings[GS_OBSIDIAN_FOLDER];  // TFolder
-		
 		await app.vault.createFolder(dest).catch(er => console.log(`Destination '${dest}' already exists`));
+
+		
+		// Read set of folders
+		let folderfilename = file.path.replace("journal.db","folders.db");
+		let foldertext = await fs.readFile(folderfilename, /*options*/ {encoding: 'utf-8'});
+		// Get all the base folders into a map,
+		// this is required so we can track the .parent to determine the full path
+		let folders = new Map();
+		for (const line of foldertext.split('\n')) {
+			if (line.length == 0) continue;
+			let folder = JSON.parse(line);
+			if (folder.type != 'JournalEntry') continue;
+			folder.name = this.validFilename(folder.name);
+			folders.set(folder._id, folder);
+		}
+		
+		folders.forEach(async (folder) => {
+			let fullname = folder.name;
+			let parent   = folder.parent;
+			while (parent) {
+				let par = folders.get(parent);
+				if (!par) break;
+				fullname = par.name + '/' + fullname;
+				parent = parent.parent;
+			}
+			fullname = dest + '/' + fullname;
+			await app.vault.createFolder(fullname).catch(err => {
+				if (err.message != 'Folder already exists.')
+					console.error(`Failed to create folder: '${fullname}' due to ${err}`)
+			});
+			folder.fullname = fullname + '/';
+		})
+		
+		// Read the journal entries
 		
         let contents = await file.text().catch(er => console.error(`Failed to read file ${file.path} due to ${er}`));
 		
@@ -112,7 +100,7 @@ export default class ImportFoundry extends Plugin {
 		for (const line of contents.split('\n')) {
 			if (line.length == 0) continue;
 			let obj = JSON.parse(line);
-			obj.filename = this.validName(obj.name);
+			obj.filename = this.validFilename(obj.name);
 			obj.markdown = htmlToMarkdown(obj.content);
 			entries.push(obj);
 		}
@@ -140,11 +128,11 @@ export default class ImportFoundry extends Plugin {
 		let foundryuserdata = file.path.slice(0, file.path.indexOf('worlds\\'));
 		
 		let filestomove = [];
-		let destForImages = dest + "/images";
+		let destForImages = dest + "/zz_asset-files";
 		
 		function fileconvert(str, filename) {
 			// See if we can grab the file.
-			console.log(`fileconvert for '${filename}'`);
+			//console.log(`fileconvert for '${filename}'`);
 			if (filename.startsWith("data:image") || filename.contains(":")) {
 				// e.g.
 				// http://URL
@@ -174,7 +162,7 @@ export default class ImportFoundry extends Plugin {
 			}
 			// Replace file references
 			if (item.markdown.includes('![](')) {
-				console.log(`File ${item.filename} has images`);
+				//console.log(`File ${item.filename} has images`);
 				const filepattern = /!\[\]\(([^)]*)\)/g;
 				item.markdown = item.markdown.replaceAll(filepattern, await fileconvert);
 			}
@@ -204,7 +192,8 @@ export default class ImportFoundry extends Plugin {
 		// Each line in the file is a separate JSON object.
 		for (const item of entries) {
 			// Write markdown to a file with the name of the Journal Entry
-			let outfilename = dest + '/' + item.filename + '.md';
+			let path = item.folder ? folders.get(item.folder).fullname : (dest + '/');
+			let outfilename = path + item.filename + '.md';
 
 			// Since we can't overwrite, delete the file if it already exists.
 			let exist = app.vault.getAbstractFileByPath(outfilename);

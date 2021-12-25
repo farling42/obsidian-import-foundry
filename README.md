@@ -10,6 +10,8 @@ Selecting the icon will prompt with a simple popup where you can select the jour
 
 Once the file is selected, the importer will immediately start creating notes in your Vault.
 
+The folder structure of your Journal Entries will be read from the folders.db file in the same folder as your selected journal.db and used to store the created notes.
+
 Any images and other files which are referenced from your journal entries wil be put into a sub-folder called "images" if they can be located within your Foundry user data area.
 
 ## Obsidian Sample Plugin
