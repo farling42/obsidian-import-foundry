@@ -1,11 +1,15 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, htmlToMarkdown } from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, htmlToMarkdown } from 'obsidian';
 import * as fs from 'fs/promises';
+import * as Electron from 'electron';  // to gain definition for File.prototype.path for Typescript
 
 const GS_OBSIDIAN_FOLDER = "assetsLocation";
 
+/**
+ * This relies in File.prototype.path, which exists in the Obsidian.md/Electron environment, but not in other browsers!
+ */
 
 interface ImportFoundrySettings {
-	GS_OBSIDIAN_FOLDER: string;
+	[GS_OBSIDIAN_FOLDER]: string;
 }
 
 const DEFAULT_SETTINGS: ImportFoundrySettings = {
@@ -43,12 +47,28 @@ export default class ImportFoundry extends Plugin {
 		await this.saveData(this.settings);
 	}
 	
-	validFilename(name) {
+	validFilename(name:string) {
 		const regexp = /[<>:"/\\|?\*]/;
 		return name.replace(regexp,'_');
 	}
 	
-	async readJournalEntries(file) {
+	async readDB(dbfile: string|File) : Promise<any[]> {
+		let contents = 
+			(typeof dbfile == "string")
+			? await fs.readFile(dbfile, /*options*/ {encoding: 'utf-8'}).catch(er => console.error(`Failed to read file ${dbfile} due to ${er}`))
+			: await dbfile.text().catch(er => console.error(`Failed to read file ${dbfile} due to ${er}`));
+
+		if (!contents) return undefined;
+
+		let result : any[] = [];
+		for (const line of contents.split('\n')) {
+			if (line.length == 0) continue;
+			result.push(JSON.parse(line));
+		}
+		return result;
+	}
+
+	async readJournalEntries(file:File) {
 		console.log(`Reading file ${file.path}, length ${file.size}`);
 		if (file.size == 0) {
 			new Notice(`File ${file.path} is empty`);
@@ -58,18 +78,14 @@ export default class ImportFoundry extends Plugin {
 
 		// The base folder for the import
 		let dest = this.settings[GS_OBSIDIAN_FOLDER];  // TFolder
-		await app.vault.createFolder(dest).catch(er => console.log(`Destination '${dest}' already exists`));
-
+		await this.app.vault.createFolder(dest).catch(er => console.log(`Destination '${dest}' already exists`));
 		
 		// Read set of folders
-		let folderfilename = file.path.replace("journal.db","folders.db");
-		let foldertext = await fs.readFile(folderfilename, /*options*/ {encoding: 'utf-8'});
 		// Get all the base folders into a map,
 		// this is required so we can track the .parent to determine the full path
-		let folders = new Map();
-		for (const line of foldertext.split('\n')) {
-			if (line.length == 0) continue;
-			let folder = JSON.parse(line);
+		let folderdb = await this.readDB(file.path.replace("journal.db","folders.db"));
+		let folders = new Map<string,any>();
+		for (let folder of folderdb) {
 			if (folder.type != 'JournalEntry') continue;
 			folder.name = this.validFilename(folder.name);
 			folders.set(folder._id, folder);
@@ -85,7 +101,7 @@ export default class ImportFoundry extends Plugin {
 				parent = parent.parent;
 			}
 			fullname = dest + '/' + fullname;
-			await app.vault.createFolder(fullname).catch(err => {
+			await this.app.vault.createFolder(fullname).catch(err => {
 				if (err.message != 'Folder already exists.')
 					console.error(`Failed to create folder: '${fullname}' due to ${err}`)
 			});
@@ -93,44 +109,48 @@ export default class ImportFoundry extends Plugin {
 		})
 		
 		// Read the journal entries
+		interface FoundryEntry {
+			// The following are explicitly added by us.
+			filename: string;
+			markdown: string;
+			// The following are from the JSON.parse decoding.
+			_id: string;
+			folder: string;
+		}
 		
-        let contents = await file.text().catch(er => console.error(`Failed to read file ${file.path} due to ${er}`));
-		
-		let entries = [];
-		for (const line of contents.split('\n')) {
-			if (line.length == 0) continue;
-			let obj = JSON.parse(line);
+		let journaldb = await this.readDB(file);
+		if (!journaldb) return;
+
+		let entries : FoundryEntry[] = [];
+		for (let obj of journaldb) {
 			obj.filename = this.validFilename(obj.name);
 			obj.markdown = htmlToMarkdown(obj.content);
 			entries.push(obj);
 		}
-		let map = {};
+		const map = new Map<string,string>();
 		for (let item of entries) {
-			map[item._id] = item.filename;
+			map.set(item._id, item.filename);
 		}
 		
-		function convert(str, id, label) {
-			let filename = map[id];
+		function convert(str:string, id:string, label:string) {
+			let filename = map.get(id);
 			if (label == filename)
 				return `[[${filename}]]`;
 			else
 				return `[[${filename}|${label}]]`;
 		}
 		
-		function findFirstDiffPos(a, b) {
-			var i = 0;
-			if (a === b) return -1;
-			while (a[i] === b[i]) i++;
-			return i;
-		}
-
 		// Path up to, but not including "worlds\"  (it uses \ not /)
 		let foundryuserdata = file.path.slice(0, file.path.indexOf('worlds\\'));
 		
-		let filestomove = [];
+		interface MoveFile {
+			srcfile: string;
+			dstfile: string;
+		}
+		let filestomove: MoveFile[] = [];
 		let destForImages = dest + "/zz_asset-files";
 		
-		function fileconvert(str, filename) {
+		function fileconvert(str:string, filename:string) {
 			// See if we can grab the file.
 			//console.log(`fileconvert for '${filename}'`);
 			if (filename.startsWith("data:image") || filename.contains(":")) {
@@ -170,23 +190,26 @@ export default class ImportFoundry extends Plugin {
 		
 		// Maybe create subfolder for images
 		if (filestomove.length > 0) {
-			await app.vault.createFolder(destForImages).catch(er => console.log(`Destination '${dest}' already exists`));
+			await this.app.vault.createFolder(destForImages).catch(er => console.log(`Destination '${destForImages}' already exists`));
 		}
 		
 		// Move all the files that fileconvert found (if any)
+		notice.setMessage('Transferring image/binary files');
 		for (let item of filestomove) {
-			const infile = await fs.open(item.srcfile);
-			let body = await infile.readFile().catch(er => console.error(`Failed to read ${item.srcfile} due to ${er}`));
-			if (body) {
+			// await required to avoid ENOENT error (too many copies/writes)
+			await fs.readFile(item.srcfile)
+			.then(async (body) => {
 				//console.log(`Copying file to ${item.dstfile}`);
 						
 				// Since we can't overwrite, delete the file if it already exists.
-				let exist = app.vault.getAbstractFileByPath(item.dstfile);
-				if (exist) app.vault.delete(exist);
+				let exist = this.app.vault.getAbstractFileByPath(item.dstfile);
+				if (exist) await this.app.vault.delete(exist).catch(err => console.error(`Failed to delete existing asset file ${item.dstfile} due to ${err}`));
 
-				// Now write the image.
-				await app.vault.create(item.dstfile, body);
-			}
+				// Now write the image file
+				await this.app.vault.createBinary(item.dstfile, body)
+					.catch(err => console.error(`Failed to create asset file ${item.dstfile} due to ${err}`));
+			})
+			.catch(er => console.error(`Failed to read ${item.srcfile} due to ${er}`));
 		}
 		
 		// Each line in the file is a separate JSON object.
@@ -196,11 +219,11 @@ export default class ImportFoundry extends Plugin {
 			let outfilename = path + item.filename + '.md';
 
 			// Since we can't overwrite, delete the file if it already exists.
-			let exist = app.vault.getAbstractFileByPath(outfilename);
-			if (exist) app.vault.delete(exist);
+			let exist = this.app.vault.getAbstractFileByPath(outfilename);
+			if (exist) await this.app.vault.delete(exist);
 			
 			notice.setMessage(`Importing\n${item.filename}`);
-			await app.vault.create(outfilename, item.markdown); //.then(file => new Notice(`Created note ${file.path}`));
+			await this.app.vault.create(outfilename, item.markdown); //.then(file => new Notice(`Created note ${file.path}`));
 		}
 		notice.setMessage("Import Finished");
 	}
@@ -209,7 +232,9 @@ export default class ImportFoundry extends Plugin {
 
 // Popup window
 class FileSelectorModal extends Modal {
-	setHandler(caller,handler) {
+	caller: Object;
+	handler: Function;
+	setHandler(caller:Object, handler:Function): void {
 		this.caller  = caller;
 		this.handler = handler;
 	}
@@ -226,8 +251,8 @@ class FileSelectorModal extends Modal {
     input.onchange = async () => {
       const { files } = input;
       if (!files.length) return;
-      for (const file of files) {
-		  await this.handler.call(this.caller, file);
+	  for (let i=0; i<files.length; i++) {
+		  await this.handler.call(this.caller, files[i]);
       }
 	  this.close();
     }
