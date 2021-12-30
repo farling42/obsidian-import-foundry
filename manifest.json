@@ -1,8 +1,8 @@
 {
 	"id": "import-foundry",
 	"name": "Import Foundry VTT journal entries",
-	"version": "0.1.1",
-	"minAppVersion": "0.12.0",
+	"version": "0.1.0",
+	"minAppVersion": "0.13.14",
 	"description": "Imports your journal entries from your selected Foundry VTT world into Obsidian.md",
 	"author": "farling42",
 	"authorUrl": "https://github.com/farling42/",
