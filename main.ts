@@ -1,6 +1,9 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, htmlToMarkdown } from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, htmlToMarkdown, AbstractTextComponent } from 'obsidian';
 import * as fs from 'fs/promises';
 import * as Electron from 'electron';  // to gain definition for File.prototype.path for Typescript
+
+let TurndownService   = require('turndown');
+let turndownPluginGfm = require('turndown-plugin-gfm');
 
 const GS_OBSIDIAN_FOLDER = "assetsLocation";
 
@@ -18,6 +21,8 @@ const DEFAULT_SETTINGS: ImportFoundrySettings = {
 
 export default class ImportFoundry extends Plugin {
 	settings: ImportFoundrySettings;
+	gfm: any;
+	turndownService: any;
 
 	async onload() {
 		await this.loadSettings();
@@ -45,8 +50,8 @@ export default class ImportFoundry extends Plugin {
 	}
 	
 	validFilename(name:string) {
-		const regexp = /[<>:"/\\|?\*]/;
-		return name.replace(regexp,'_');
+		const regexp = /[<>:"/\\|?*]/g;
+		return name.replaceAll(regexp,'_');
 	}
 	
 	async readDB(dbfile: string|File) : Promise<any[]> {
@@ -63,6 +68,20 @@ export default class ImportFoundry extends Plugin {
 			result.push(JSON.parse(line));
 		}
 		return result;
+	}
+
+	convertHtml(html:string) {
+		// htmlToMarkdown does not handle tables properly!
+		if (!this.turndownService) {
+			// Setup Turndown service to use GFM for tables
+			this.turndownService = new TurndownService({ headingStyle: "atx" });
+			this.gfm = turndownPluginGfm.gfm;
+			this.turndownService.use(this.gfm);
+		}
+
+		let markdown:string = this.turndownService.turndown(html);
+
+		return markdown;
 	}
 
 	async readJournalEntries(file:File, foldername:string) {
@@ -123,7 +142,11 @@ export default class ImportFoundry extends Plugin {
 		let entries : FoundryEntry[] = [];
 		for (let obj of journaldb) {
 			obj.filename = this.validFilename(obj.name);
-			obj.markdown = htmlToMarkdown(obj.content);
+
+			let markdown:string = this.convertHtml(obj.content);
+			// Put ID into frontmatter (for later imports)
+			if (markdown) markdown = '```\nfoundryId: journal-' + `${obj._id}` + '\n```\n' + markdown;
+			obj.markdown = markdown;
 			entries.push(obj);
 		}
 		const map = new Map<string,string>();
@@ -160,6 +183,7 @@ export default class ImportFoundry extends Plugin {
 				console.log(`Ignoring image file/external URL: ${filename}`);
 				return str;
 			}
+			filename = filename.replaceAll('%20', ' ');
 			// filename = "worlds/cthulhu/realmworksimport/sdfdsfrs.png"
 			// basename = ".../worlds/cthulhu/data/journal.db"
 			let basefilename = filename.slice(filename.lastIndexOf('/') + 1);
@@ -225,7 +249,8 @@ export default class ImportFoundry extends Plugin {
 			if (exist) await this.app.vault.delete(exist);
 			
 			notice.setMessage(`Importing\n${item.filename}`);
-			await this.app.vault.create(outfilename, item.markdown); //.then(file => new Notice(`Created note ${outfilename}`));
+			await this.app.vault.create(outfilename, item.markdown)
+				.catch(err => new Notice(`Creating Note for ${item.filename} failed due to ${err}`));
 		}
 		notice.setMessage("Import Finished");
 	}
