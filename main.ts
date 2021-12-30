@@ -26,14 +26,11 @@ export default class ImportFoundry extends Plugin {
 		const ribbonIconEl = this.addRibbonIcon('magnifying-glass', 'Import Foundry', async (evt: MouseEvent) => {
 			// Called when the user clicks the icon.
 			const modal = new FileSelectorModal(this.app);
-			modal.setHandler(this, this.readJournalEntries);
+			modal.setHandler(this, this.readJournalEntries, this.settings[GS_OBSIDIAN_FOLDER]);
 			modal.open();
 		});
 		// Perform additional things with the ribbon
 		ribbonIconEl.addClass('import-foundry-ribbon-class');
-		
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new ImportFoundrySettingTab(this.app, this));
 	}
 
 	onunload() {
@@ -68,22 +65,23 @@ export default class ImportFoundry extends Plugin {
 		return result;
 	}
 
-	async readJournalEntries(file:File) {
-		console.log(`Reading file ${file.path}, length ${file.size}`);
+	async readJournalEntries(file:File, foldername:string) {
+		let sourcepath=file.path;   // File#path is an extension provided by the Electron browser
+		console.log(`Reading file ${sourcepath}, length ${file.size}`);
 		if (file.size == 0) {
-			new Notice(`File ${file.path} is empty`);
+			new Notice(`File ${sourcepath} is empty`);
 			return;
 		}
 		let notice = new Notice(`Starting import`, 0);
 
 		// The base folder for the import
-		let dest = this.settings[GS_OBSIDIAN_FOLDER];  // TFolder
-		await this.app.vault.createFolder(dest).catch(er => console.log(`Destination '${dest}' already exists`));
+		await this.app.vault.createFolder(foldername).catch(er => console.log(`Destination '${foldername}' already exists`));
 		
-		// Read set of folders
-		// Get all the base folders into a map,
+		// Read the folders DB.
+		let folderdb = await this.readDB(sourcepath.replace("journal.db","folders.db"));
+
+		// Get all the base folders (for Journal Entries only) into a map,
 		// this is required so we can track the .parent to determine the full path
-		let folderdb = await this.readDB(file.path.replace("journal.db","folders.db"));
 		let folders = new Map<string,any>();
 		for (let folder of folderdb) {
 			if (folder.type != 'JournalEntry') continue;
@@ -100,7 +98,7 @@ export default class ImportFoundry extends Plugin {
 				fullname = par.name + '/' + fullname;
 				parent = parent.parent;
 			}
-			fullname = dest + '/' + fullname;
+			fullname = foldername + '/' + fullname;
 			await this.app.vault.createFolder(fullname).catch(err => {
 				if (err.message != 'Folder already exists.')
 					console.error(`Failed to create folder: '${fullname}' due to ${err}`)
@@ -118,6 +116,7 @@ export default class ImportFoundry extends Plugin {
 			folder: string;
 		}
 		
+		// Read the Journal DB
 		let journaldb = await this.readDB(file);
 		if (!journaldb) return;
 
@@ -141,14 +140,14 @@ export default class ImportFoundry extends Plugin {
 		}
 		
 		// Path up to, but not including "worlds\"  (it uses \ not /)
-		let foundryuserdata = file.path.slice(0, file.path.indexOf('worlds\\'));
+		let foundryuserdata = sourcepath.slice(0, sourcepath.indexOf('worlds\\'));
 		
 		interface MoveFile {
 			srcfile: string;
 			dstfile: string;
 		}
 		let filestomove: MoveFile[] = [];
-		let destForImages = dest + "/zz_asset-files";
+		let destForImages = foldername + "/zz_asset-files";
 		
 		function fileconvert(str:string, filename:string) {
 			// See if we can grab the file.
@@ -184,7 +183,7 @@ export default class ImportFoundry extends Plugin {
 			if (item.markdown.includes('![](')) {
 				//console.log(`File ${item.filename} has images`);
 				const filepattern = /!\[\]\(([^)]*)\)/g;
-				item.markdown = item.markdown.replaceAll(filepattern, await fileconvert);
+				item.markdown = item.markdown.replaceAll(filepattern, fileconvert);
 			}
 		}
 		
@@ -193,6 +192,9 @@ export default class ImportFoundry extends Plugin {
 			await this.app.vault.createFolder(destForImages).catch(er => console.log(`Destination '${destForImages}' already exists`));
 		}
 		
+		this.settings[GS_OBSIDIAN_FOLDER] = foldername;
+		this.saveSettings();
+
 		// Move all the files that fileconvert found (if any)
 		notice.setMessage('Transferring image/binary files');
 		for (let item of filestomove) {
@@ -215,7 +217,7 @@ export default class ImportFoundry extends Plugin {
 		// Each line in the file is a separate JSON object.
 		for (const item of entries) {
 			// Write markdown to a file with the name of the Journal Entry
-			let path = item.folder ? folders.get(item.folder).fullname : (dest + '/');
+			let path = item.folder ? folders.get(item.folder).fullname : (foldername + '/');
 			let outfilename = path + item.filename + '.md';
 
 			// Since we can't overwrite, delete the file if it already exists.
@@ -223,7 +225,7 @@ export default class ImportFoundry extends Plugin {
 			if (exist) await this.app.vault.delete(exist);
 			
 			notice.setMessage(`Importing\n${item.filename}`);
-			await this.app.vault.create(outfilename, item.markdown); //.then(file => new Notice(`Created note ${file.path}`));
+			await this.app.vault.create(outfilename, item.markdown); //.then(file => new Notice(`Created note ${outfilename}`));
 		}
 		notice.setMessage("Import Finished");
 	}
@@ -234,72 +236,41 @@ export default class ImportFoundry extends Plugin {
 class FileSelectorModal extends Modal {
 	caller: Object;
 	handler: Function;
-	setHandler(caller:Object, handler:Function): void {
+	foldername: string;
+
+	setHandler(caller:Object, handler:Function, foldername:string): void {
 		this.caller  = caller;
 		this.handler = handler;
+		this.foldername = foldername;
 	}
 
   onOpen() {
-    const setting = new Setting(this.contentEl).setName("Choose File").setDesc("Choose journal.db file to import");
-    const input = setting.controlEl.createEl("input", {
+    const setting1 = new Setting(this.contentEl).setName("Choose File").setDesc("Choose journal.db file to import");
+    const input1 = setting1.controlEl.createEl("input", {
       attr: {
         type: "file",
         accept: ".db"
       }
     });
+    const setting2 = new Setting(this.contentEl).setName("Parent Folder").setDesc("Enter the name of the Obsidian folder into which the data will be imported");
+    const input2 = setting2.controlEl.createEl("input", {
+      attr: {
+        type: "string",
+      }
+    });
+	input2.value = this.foldername;
+
+    const setting3 = new Setting(this.contentEl).setName("Parent Folder").setDesc("Enter the name of the Obsidian folder into which the data will be imported");
+    const input3 = setting3.controlEl.createEl("button");
+	input3.textContent = "IMPORT";
 	
-    input.onchange = async () => {
-      const { files } = input;
+    input3.onclick = async () => {
+      const { files } = input1;
       if (!files.length) return;
 	  for (let i=0; i<files.length; i++) {
-		  await this.handler.call(this.caller, files[i]);
+		  await this.handler.call(this.caller, files[i], input2.value);
       }
 	  this.close();
     }
   }
-}
-
-class ImportFoundryModel extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class ImportFoundrySettingTab extends PluginSettingTab {
-	plugin: ImportFoundry;
-
-	constructor(app: App, plugin: ImportFoundry) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		containerEl.createEl('h2', {text: 'Settings for the Foundry Importer.'});
-
-		new Setting(containerEl)
-			.setName('Obsidian Data location')
-			.setDesc('The name of the Obsidian folder into which all Notes will be created')
-			.addText(text => text
-				.setPlaceholder('obsidian-folder')
-				.setValue(this.plugin.settings[GS_OBSIDIAN_FOLDER])
-				.onChange(async (value) => {
-					console.log(GS_OBSIDIAN_FOLDER + ': ' + value);
-					this.plugin.settings[GS_OBSIDIAN_FOLDER] = value;
-					await this.plugin.saveSettings();
-				}));
-	}
 }
