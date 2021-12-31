@@ -194,14 +194,15 @@ export default class ImportFoundry extends Plugin {
 			return `![[${basefilename}]]`;
 		}
 		
-		// Replace @JournalEntry[id]{label} with [[filename-for-id]](label)
+		// Replace @JournalEntry\[id\]{label} with [[filename-for-id]](label)
 		for (let item of entries) {
 			// Replace Journal Links
 			if (item.markdown.includes('@JournalEntry')) {
-				const pattern = /@JournalEntry\[([^\]]*)\]{([^\}]*)}/g;
+				// The square brackets in @JournalEntry will already have been escaped!
+				const pattern = /@JournalEntry\\\[([^\]]*)\\\]{([^\}]*)}/g;
 				//console.log(`Replacing @JournalEntry in\n${item.markdown}`);
 				item.markdown = item.markdown.replaceAll(pattern, convert);
-				//console.log(`It became\n${item.markdown}`);
+				console.log(`Replaced @JournalEntry to became\n${item.markdown}`);
 			}
 			// Replace file references
 			if (item.markdown.includes('![](')) {
