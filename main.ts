@@ -202,7 +202,7 @@ export default class ImportFoundry extends Plugin {
 				const pattern = /@JournalEntry\\\[([^\]]*)\\\]{([^\}]*)}/g;
 				//console.log(`Replacing @JournalEntry in\n${item.markdown}`);
 				item.markdown = item.markdown.replaceAll(pattern, convert);
-				console.log(`Replaced @JournalEntry to became\n${item.markdown}`);
+				//console.log(`Replaced @JournalEntry to became\n${item.markdown}`);
 			}
 			// Replace file references
 			if (item.markdown.includes('![](')) {
