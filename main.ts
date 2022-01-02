@@ -6,6 +6,7 @@ let TurndownService   = require('turndown');
 let turndownPluginGfm = require('turndown-plugin-gfm');
 
 const GS_OBSIDIAN_FOLDER = "assetsLocation";
+const GS_FOLDER_NOTES = "createFolderNotes";
 
 /**
  * This relies in File.prototype.path, which exists in the Obsidian.md/Electron environment, but not in other browsers!
@@ -13,16 +14,19 @@ const GS_OBSIDIAN_FOLDER = "assetsLocation";
 
 interface ImportFoundrySettings {
 	[GS_OBSIDIAN_FOLDER]: string;
+	[GS_FOLDER_NOTES] : boolean;
 }
 
 const DEFAULT_SETTINGS: ImportFoundrySettings = {
 	[GS_OBSIDIAN_FOLDER]: "FoundryImport",
+	[GS_FOLDER_NOTES]: false
 }
 
 export default class ImportFoundry extends Plugin {
 	settings: ImportFoundrySettings;
 	gfm: any;
 	turndownService: any;
+	create_folder_notes: boolean;
 
 	async onload() {
 		await this.loadSettings();
@@ -31,7 +35,7 @@ export default class ImportFoundry extends Plugin {
 		const ribbonIconEl = this.addRibbonIcon('magnifying-glass', 'Import Foundry', async (evt: MouseEvent) => {
 			// Called when the user clicks the icon.
 			const modal = new FileSelectorModal(this.app);
-			modal.setHandler(this, this.readJournalEntries, this.settings[GS_OBSIDIAN_FOLDER]);
+			modal.setHandler(this, this.readJournalEntries, this.settings[GS_OBSIDIAN_FOLDER], this.settings[GS_FOLDER_NOTES]);
 			modal.open();
 		});
 		// Perform additional things with the ribbon
@@ -84,7 +88,7 @@ export default class ImportFoundry extends Plugin {
 		return markdown;
 	}
 
-	async readJournalEntries(file:File, foldername:string) {
+	async readJournalEntries(file:File, topfoldername:string, createFolderNotes:boolean) {
 		let sourcepath=file.path;   // File#path is an extension provided by the Electron browser
 		console.log(`Reading file ${sourcepath}, length ${file.size}`);
 		if (file.size == 0) {
@@ -92,9 +96,11 @@ export default class ImportFoundry extends Plugin {
 			return;
 		}
 		let notice = new Notice(`Starting import`, 0);
+		// Create folder notes if we have the folder notes plugin enabled.
+		this.create_folder_notes = createFolderNotes;
 
 		// The base folder for the import
-		await this.app.vault.createFolder(foldername).catch(er => console.log(`Destination '${foldername}' already exists`));
+		await this.app.vault.createFolder(topfoldername).catch(er => console.log(`Destination '${topfoldername}' already exists`));
 		
 		// Read the folders DB.
 		let folderdb = await this.readDB(sourcepath.replace("journal.db","folders.db"));
@@ -104,25 +110,34 @@ export default class ImportFoundry extends Plugin {
 		let folders = new Map<string,any>();
 		for (let folder of folderdb) {
 			if (folder.type != 'JournalEntry') continue;
-			folder.name = this.validFilename(folder.name);
+			folder.filename = this.validFilename(folder.name);
 			folders.set(folder._id, folder);
 		}
 		
 		folders.forEach(async (folder) => {
-			let fullname = folder.name;
-			let parent   = folder.parent;
-			while (parent) {
-				let par = folders.get(parent);
-				if (!par) break;
-				fullname = par.name + '/' + fullname;
-				parent = parent.parent;
+			let fullpath = folder.filename;
+			let parentid = folder.parent;
+			while (parentid) {
+				let parentobj = folders.get(parentid);
+				if (!parentobj) break;
+				fullpath = parentobj.filename + '/' + fullpath;
+				parentid = parentobj.parent;
 			}
-			fullname = foldername + '/' + fullname;
-			await this.app.vault.createFolder(fullname).catch(err => {
+			fullpath = topfoldername + '/' + fullpath;
+			await this.app.vault.createFolder(fullpath).catch(err => {
 				if (err.message != 'Folder already exists.')
-					console.error(`Failed to create folder: '${fullname}' due to ${err}`)
+					console.error(`Failed to create folder: '${fullpath}' due to ${err}`)
 			});
-			folder.fullname = fullname + '/';
+			folder.fullpath = fullpath + '/';
+			if (this.create_folder_notes) {
+				let notepath = folder.fullpath + folder.filename + ".md";
+				// Delete old note if it already exists
+				let exist = this.app.vault.getAbstractFileByPath(notepath);
+				if (exist) await this.app.vault.delete(exist);
+
+				let foldernote = "```\n" + `title: "${folder.name}"\n` + `aliases: "${folder.name}"\n` + "```\n" + `# ${folder.name}\n`;
+				await this.app.vault.create(notepath, foldernote);
+			}
 		})
 		
 		// Read the journal entries
@@ -145,7 +160,9 @@ export default class ImportFoundry extends Plugin {
 
 			let markdown:string = this.convertHtml(obj.content);
 			// Put ID into frontmatter (for later imports)
-			if (markdown) markdown = '```\nfoundryId: journal-' + `${obj._id}` + '\n```\n' + markdown;
+			if (markdown) {
+				markdown = "```\n" + `title: "${obj.name}"\n` + `aliases: "${obj.name}"\n` + `foundryId: journal-${obj._id}\n` + "```\n" + markdown;
+			}
 			obj.markdown = markdown;
 			entries.push(obj);
 		}
@@ -170,7 +187,7 @@ export default class ImportFoundry extends Plugin {
 			dstfile: string;
 		}
 		let filestomove: MoveFile[] = [];
-		let destForImages = foldername + "/zz_asset-files";
+		let destForImages = topfoldername + "/zz_asset-files";
 		
 		function fileconvert(str:string, filename:string) {
 			// See if we can grab the file.
@@ -210,6 +227,8 @@ export default class ImportFoundry extends Plugin {
 				const filepattern = /!\[\]\(([^)]*)\)/g;
 				item.markdown = item.markdown.replaceAll(filepattern, fileconvert);
 			}
+			// Check for PDFoundry?
+			//if (item.flags?.pdfoundry?.PDFData?.url)
 		}
 		
 		// Maybe create subfolder for images
@@ -217,7 +236,8 @@ export default class ImportFoundry extends Plugin {
 			await this.app.vault.createFolder(destForImages).catch(er => console.log(`Destination '${destForImages}' already exists`));
 		}
 		
-		this.settings[GS_OBSIDIAN_FOLDER] = foldername;
+		this.settings[GS_OBSIDIAN_FOLDER] = topfoldername;
+		this.settings[GS_FOLDER_NOTES]    = createFolderNotes;
 		this.saveSettings();
 
 		// Move all the files that fileconvert found (if any)
@@ -242,7 +262,7 @@ export default class ImportFoundry extends Plugin {
 		// Each line in the file is a separate JSON object.
 		for (const item of entries) {
 			// Write markdown to a file with the name of the Journal Entry
-			let path = item.folder ? folders.get(item.folder).fullname : (foldername + '/');
+			let path = item.folder ? folders.get(item.folder).fullpath : (topfoldername + '/');
 			let outfilename = path + item.filename + '.md';
 
 			// Since we can't overwrite, delete the file if it already exists.
@@ -263,11 +283,13 @@ class FileSelectorModal extends Modal {
 	caller: Object;
 	handler: Function;
 	foldername: string;
+	createFolderNote: boolean;
 
-	setHandler(caller:Object, handler:Function, foldername:string): void {
+	setHandler(caller:Object, handler:Function, foldername:string, createFolderNote:boolean): void {
 		this.caller  = caller;
 		this.handler = handler;
 		this.foldername = foldername;
+		this.createFolderNote = createFolderNote;
 	}
 
   onOpen() {
@@ -281,20 +303,28 @@ class FileSelectorModal extends Modal {
     const setting2 = new Setting(this.contentEl).setName("Parent Folder").setDesc("Enter the name of the Obsidian folder into which the data will be imported");
     const input2 = setting2.controlEl.createEl("input", {
       attr: {
-        type: "string",
+        type: "string"
       }
     });
 	input2.value = this.foldername;
 
-    const setting3 = new Setting(this.contentEl).setName("Parent Folder").setDesc("Enter the name of the Obsidian folder into which the data will be imported");
-    const input3 = setting3.controlEl.createEl("button");
-	input3.textContent = "IMPORT";
+    const setting3 = new Setting(this.contentEl).setName("Create Folder Notes").setDesc("When checked, a note with the same name as the folder will be created in each folder (e.g. for AidenLX's Folder Notes plugin)");
+    const input3 = setting3.controlEl.createEl("input", {
+      attr: {
+        type: "checkbox"
+      }
+    });
+	input3.checked = this.createFolderNote;
+
+    const setting4 = new Setting(this.contentEl).setName("Process").setDesc("Click this button to start the import");
+    const input4 = setting4.controlEl.createEl("button");
+	input4.textContent = "IMPORT";
 	
-    input3.onclick = async () => {
+    input4.onclick = async () => {
       const { files } = input1;
       if (!files.length) return;
 	  for (let i=0; i<files.length; i++) {
-		  await this.handler.call(this.caller, files[i], input2.value);
+		  await this.handler.call(this.caller, files[i], input2.value, input3.checked);
       }
 	  this.close();
     }
