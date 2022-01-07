@@ -1,3 +1,5 @@
+![Latest Release Download Count](https://img.shields.io/github/downloads/farling42/obsidian-import-foundry/latest/module.zip)
+
 ## Foundry Journal Importer
 
 This is a simple plugin to transform the journal.db file from the Foundry VTT into separate notes in your Obsidian Vault.
