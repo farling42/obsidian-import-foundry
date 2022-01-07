@@ -1,4 +1,4 @@
-![Latest Release Download Count](https://img.shields.io/github/downloads/farling42/obsidian-import-foundry/latest/module.zip)
+![Latest Release Download Count](https://img.shields.io/github/downloads/farling42/obsidian-import-foundry/latest/main.js)
 
 ## Foundry Journal Importer
 
