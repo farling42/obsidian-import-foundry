@@ -1,4 +1,9 @@
+[![ko-fi](https://img.shields.io/badge/Ko--Fi-farling-success)](https://ko-fi.com/farling)
+[![patreon](https://img.shields.io/badge/Patreon-amusingtime-success)](https://patreon.com/amusingtime)
+[![paypal](https://img.shields.io/badge/Paypal-farling-success)](https://paypal.me/farling)
+![GitHub License](https://img.shields.io/github/license/farling42/obsidian-import-foundry)
 ![Latest Release Download Count](https://img.shields.io/github/downloads/farling42/obsidian-import-foundry/latest/main.js)
+
 
 ## Foundry Journal Importer
 
