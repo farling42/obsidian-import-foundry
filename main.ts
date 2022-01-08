@@ -61,14 +61,15 @@ export default class ImportFoundry extends Plugin {
 	async readDB(dbfile: string|File) : Promise<any[]> {
 		let contents = 
 			(typeof dbfile == "string")
-			? await fs.readFile(dbfile, /*options*/ {encoding: 'utf-8'}).catch(er => console.error(`Failed to read file ${dbfile} due to ${er}`))
-			: await dbfile.text().catch(er => console.error(`Failed to read file ${dbfile} due to ${er}`));
+			? await fs.readFile(dbfile, /*options*/ {encoding: 'utf-8'}).catch(err => console.error(`Failed to read file ${dbfile} due to ${err}`))
+			: await dbfile.text().catch(err => console.error(`Failed to read file ${dbfile} due to ${err}`));
 
 		if (!contents) return undefined;
 
 		let result : any[] = [];
 		for (const line of contents.split('\n')) {
-			if (line.length == 0) continue;
+			// Ignore deleted lines
+			if (line.length == 0 || line.contains('"$$deleted":true')) continue;
 			result.push(JSON.parse(line));
 		}
 		return result;
@@ -89,6 +90,12 @@ export default class ImportFoundry extends Plugin {
 	}
 
 	async readJournalEntries(file:File, topfoldername:string, createFolderNotes:boolean) {
+
+		async function deleteIfExists(app:any, filename:string) {
+			let exist = app.vault.getAbstractFileByPath(filename);
+			if (exist) await app.vault.delete(exist).catch(err => console.log(`Failed to delete ${filename} due to ${err}`));
+		}
+
 		let sourcepath=file.path;   // File#path is an extension provided by the Electron browser
 		console.log(`Reading file ${sourcepath}, length ${file.size}`);
 		if (file.size == 0) {
@@ -100,7 +107,7 @@ export default class ImportFoundry extends Plugin {
 		this.create_folder_notes = createFolderNotes;
 
 		// The base folder for the import
-		await this.app.vault.createFolder(topfoldername).catch(er => console.log(`Destination '${topfoldername}' already exists`));
+		await this.app.vault.createFolder(topfoldername).catch(err => console.log(`Destination '${topfoldername}' already exists`));
 		
 		// Read the folders DB.
 		let folderdb = await this.readDB(sourcepath.replace("journal.db","folders.db"));
@@ -114,7 +121,7 @@ export default class ImportFoundry extends Plugin {
 			folders.set(folder._id, folder);
 		}
 		
-		folders.forEach(async (folder) => {
+		for (let folder of folders.values()) {
 			let fullpath = folder.filename;
 			let parentid = folder.parent;
 			while (parentid) {
@@ -132,13 +139,12 @@ export default class ImportFoundry extends Plugin {
 			if (this.create_folder_notes) {
 				let notepath = folder.fullpath + folder.filename + ".md";
 				// Delete old note if it already exists
-				let exist = this.app.vault.getAbstractFileByPath(notepath);
-				if (exist) await this.app.vault.delete(exist);
+				await deleteIfExists(this.app, notepath);
 
 				let foldernote = "```\n" + `title: "${folder.name}"\n` + `aliases: "${folder.name}"\n` + "```\n" + `# ${folder.name}\n`;
 				await this.app.vault.create(notepath, foldernote);
 			}
-		})
+		}
 		
 		// Read the journal entries
 		interface FoundryEntry {
@@ -233,7 +239,7 @@ export default class ImportFoundry extends Plugin {
 		
 		// Maybe create subfolder for images
 		if (filestomove.length > 0) {
-			await this.app.vault.createFolder(destForImages).catch(er => console.log(`Destination '${destForImages}' already exists`));
+			await this.app.vault.createFolder(destForImages).catch(err => console.log(`Destination '${destForImages}' already exists`));
 		}
 		
 		this.settings[GS_OBSIDIAN_FOLDER] = topfoldername;
@@ -244,19 +250,17 @@ export default class ImportFoundry extends Plugin {
 		notice.setMessage('Transferring image/binary files');
 		for (let item of filestomove) {
 			// await required to avoid ENOENT error (too many copies/writes)
-			await fs.readFile(item.srcfile)
-			.then(async (body) => {
+			let body = await fs.readFile(item.srcfile).catch(err => { console.error(`Failed to read ${item.srcfile} due to ${err}`); return null});
+			if (body) {
 				//console.log(`Copying file to ${item.dstfile}`);
-						
+
 				// Since we can't overwrite, delete the file if it already exists.
-				let exist = this.app.vault.getAbstractFileByPath(item.dstfile);
-				if (exist) await this.app.vault.delete(exist).catch(err => console.error(`Failed to delete existing asset file ${item.dstfile} due to ${err}`));
+				await deleteIfExists(this.app, item.dstfile);
 
 				// Now write the image file
 				await this.app.vault.createBinary(item.dstfile, body)
 					.catch(err => console.error(`Failed to create asset file ${item.dstfile} due to ${err}`));
-			})
-			.catch(er => console.error(`Failed to read ${item.srcfile} due to ${er}`));
+			}
 		}
 		
 		// Each line in the file is a separate JSON object.
@@ -266,8 +270,7 @@ export default class ImportFoundry extends Plugin {
 			let outfilename = path + item.filename + '.md';
 
 			// Since we can't overwrite, delete the file if it already exists.
-			let exist = this.app.vault.getAbstractFileByPath(outfilename);
-			if (exist) await this.app.vault.delete(exist);
+			await deleteIfExists(this.app, outfilename);
 			
 			notice.setMessage(`Importing\n${item.filename}`);
 			await this.app.vault.create(outfilename, item.markdown)

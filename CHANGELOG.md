@@ -1,3 +1,8 @@
+# 0.5.0
+Ensure deleted entries in the neDB files are ignored.
+
+Remove all uses of .foreach() and .then().
+
 # 0.4.0
 Add option to have a note created for each folder (for folder note plugins).
 
