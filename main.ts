@@ -191,9 +191,11 @@ export default class ImportFoundry extends Plugin {
 		interface MoveFile {
 			srcfile: string;
 			dstfile: string;
+			entryName: string;
 		}
 		let filestomove: MoveFile[] = [];
 		let destForImages = topfoldername + "/zz_asset-files";
+		let currententry:string;
 		
 		function fileconvert(str:string, filename:string) {
 			// See if we can grab the file.
@@ -203,7 +205,7 @@ export default class ImportFoundry extends Plugin {
 				// http://URL
 				// https://URL
 				// data:image;inline binary
-				console.log(`Ignoring image file/external URL: ${filename}`);
+				console.log(`Ignoring image file/external URL in '${currententry}':\n${filename}`);
 				return str;
 			}
 			filename = filename.replaceAll('%20', ' ');
@@ -212,7 +214,8 @@ export default class ImportFoundry extends Plugin {
 			let basefilename = filename.slice(filename.lastIndexOf('/') + 1);
 			filestomove.push( {
 				srcfile: foundryuserdata + filename,
-				dstfile: destForImages + '/' + basefilename
+				dstfile: destForImages + '/' + basefilename,
+				entryName: currententry,
 				});
 			return `![[${basefilename}]]`;
 		}
@@ -231,6 +234,7 @@ export default class ImportFoundry extends Plugin {
 			if (item.markdown.includes('![](')) {
 				//console.log(`File ${item.filename} has images`);
 				const filepattern = /!\[\]\(([^)]*)\)/g;
+				currententry = item.filename;
 				item.markdown = item.markdown.replaceAll(filepattern, fileconvert);
 			}
 			// Check for PDFoundry?
@@ -250,7 +254,7 @@ export default class ImportFoundry extends Plugin {
 		notice.setMessage('Transferring image/binary files');
 		for (let item of filestomove) {
 			// await required to avoid ENOENT error (too many copies/writes)
-			let body = await fs.readFile(item.srcfile).catch(err => { console.error(`Failed to read ${item.srcfile} due to ${err}`); return null});
+			let body = await fs.readFile(item.srcfile).catch(err => { console.error(`Failed to read ${item.srcfile} from '${item.entryName}' due to ${err}`); return null});
 			if (body) {
 				//console.log(`Copying file to ${item.dstfile}`);
 
