@@ -1,3 +1,8 @@
+# 0.6.0
+When failing to migrate an image, report the name of the journal entry in which it occurs.
+
+Update README.md to match the current usage.
+
 # 0.5.0
 Ensure deleted entries in the neDB files are ignored.
 
