@@ -40,6 +40,16 @@ export default class ImportFoundry extends Plugin {
 		});
 		// Perform additional things with the ribbon
 		ribbonIconEl.addClass('import-foundry-ribbon-class');
+		this.addCommand({
+			id: 'import-foundry',
+			name: 'Import Foundry journal.db',
+			callback: () => {
+				// Called when the user clicks the icon.
+				const modal = new FileSelectorModal(this.app);
+				modal.setHandler(this, this.readJournalEntries, this.settings[GS_OBSIDIAN_FOLDER], this.settings[GS_FOLDER_NOTES]);
+				modal.open();
+			}
+		});
 	}
 
 	onunload() {
