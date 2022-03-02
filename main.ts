@@ -7,6 +7,7 @@ let turndownPluginGfm = require('turndown-plugin-gfm');
 
 const GS_OBSIDIAN_FOLDER = "assetsLocation";
 const GS_FOLDER_NOTES = "createFolderNotes";
+const GS_SHOW_RIBBON = "showRibbon";
 
 /**
  * This relies in File.prototype.path, which exists in the Obsidian.md/Electron environment, but not in other browsers!
@@ -14,12 +15,14 @@ const GS_FOLDER_NOTES = "createFolderNotes";
 
 interface ImportFoundrySettings {
 	[GS_OBSIDIAN_FOLDER]: string;
-	[GS_FOLDER_NOTES] : boolean;
+	[GS_FOLDER_NOTES]: boolean;
+	[GS_SHOW_RIBBON]: boolean;
 }
 
 const DEFAULT_SETTINGS: ImportFoundrySettings = {
 	[GS_OBSIDIAN_FOLDER]: "FoundryImport",
-	[GS_FOLDER_NOTES]: false
+	[GS_FOLDER_NOTES]: false,
+	[GS_SHOW_RIBBON]: true
 }
 
 export default class ImportFoundry extends Plugin {
@@ -27,19 +30,14 @@ export default class ImportFoundry extends Plugin {
 	gfm: any;
 	turndownService: any;
 	create_folder_notes: boolean;
+	ribbonIconEl: HTMLElement;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('magnifying-glass', 'Import Foundry', async (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			const modal = new FileSelectorModal(this.app);
-			modal.setHandler(this, this.readJournalEntries, this.settings[GS_OBSIDIAN_FOLDER], this.settings[GS_FOLDER_NOTES]);
-			modal.open();
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('import-foundry-ribbon-class');
+		if (this.settings[GS_SHOW_RIBBON]) {
+			this.createRibbon();
+		}
 		this.addCommand({
 			id: 'import-foundry',
 			name: 'Import Foundry journal.db',
@@ -50,6 +48,8 @@ export default class ImportFoundry extends Plugin {
 				modal.open();
 			}
 		});
+
+		this.addSettingTab(new FoundryImportSettingTab(this.app, this));
 	}
 
 	onunload() {
@@ -61,6 +61,22 @@ export default class ImportFoundry extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+}
+
+	createRibbon() {
+		// This creates an icon in the left ribbon.
+		this.ribbonIconEl = this.addRibbonIcon('magnifying-glass', 'Import Foundry', async (evt: MouseEvent) => {
+			// Called when the user clicks the icon.
+			const modal = new FileSelectorModal(this.app);
+			modal.setHandler(this, this.readJournalEntries, this.settings[GS_OBSIDIAN_FOLDER], this.settings[GS_FOLDER_NOTES]);
+			modal.open();
+		});
+		// Perform additional things with the ribbon
+		this.ribbonIconEl.addClass('import-foundry-ribbon-class');
+	}
+
+	destroyRibbon() {
+		this.ribbonIconEl.remove();
 	}
 	
 	validFilename(name:string) {
@@ -346,4 +362,35 @@ class FileSelectorModal extends Modal {
 	  this.close();
     }
   }
+}
+class FoundryImportSettingTab extends PluginSettingTab {
+	plugin: ImportFoundry;
+
+	constructor(app: App, plugin: ImportFoundry) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
+
+	display(): void {
+		const { containerEl } = this;
+
+		containerEl.empty();
+
+		containerEl.createEl('h2', { text: 'Settings for Foundry Import.' });
+
+		new Setting(containerEl)
+			.setName('Show ribbon')
+			.setDesc('If true, show the magnifying glass command to import foundry journal.db files')
+			.addToggle(text => text
+				.setValue(this.plugin.settings[GS_SHOW_RIBBON])
+				.onChange(async (value) => {
+					this.plugin.settings[GS_SHOW_RIBBON] = value;
+					await this.plugin.saveSettings();
+					if (value) {
+						this.plugin.createRibbon();
+					} else {
+						this.plugin.destroyRibbon();
+					}
+				}));
+	}
 }
