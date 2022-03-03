@@ -1,3 +1,8 @@
+# 0.7.0
+Incorporate two improvement made by zombiecalypse:
+- The presence of the magnifying glass icon in the left ribbon bar is optional (default enabled, but can be disabled in the "Plugin Options" for this module)
+- A Hotkey can be configured to open the import dialogue (look for the hotkey named "Import Foundry VTT journal entries: Import Foundry journal.db")
+
 # 0.6.0
 When failing to migrate an image, report the name of the journal entry in which it occurs.
 

@@ -61,7 +61,7 @@ export default class ImportFoundry extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-}
+	}
 
 	createRibbon() {
 		// This creates an icon in the left ribbon.
@@ -363,6 +363,7 @@ class FileSelectorModal extends Modal {
     }
   }
 }
+
 class FoundryImportSettingTab extends PluginSettingTab {
 	plugin: ImportFoundry;
 
@@ -380,7 +381,7 @@ class FoundryImportSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Show ribbon')
-			.setDesc('If true, show the magnifying glass command to import foundry journal.db files')
+			.setDesc('When selected, shows the magnifying glass in the left ribbon bar to import foundry journal.db files')
 			.addToggle(text => text
 				.setValue(this.plugin.settings[GS_SHOW_RIBBON])
 				.onChange(async (value) => {

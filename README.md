@@ -20,3 +20,5 @@ Press the IMPORT button to start the importing.
 The folder structure of your Journal Entries will be read from the folders.db file in the same folder as your selected journal.db and used to store the created notes.
 
 Any images and other files which are referenced from your journal entries wil be put into a sub-folder called "zz_asset-files" if they can be located within your Foundry user data area. If any image isn't copied, then a report will appear in the Obsidian dev log (open with ctrl+shift+i on MS windows).
+
+[zombiecalypse](https://github.com/zombiecalypse) provided support to assign a hotkey to open the import dialog, and to have the control icon's presence in the left icon bar optional.
