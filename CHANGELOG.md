@@ -1,3 +1,6 @@
+# 0.7.1
+Frontmatter of each note should be surrounded by --- not ```
+
 # 0.7.0
 Incorporate two improvement made by zombiecalypse:
 - The presence of the magnifying glass icon in the left ribbon bar is optional (default enabled, but can be disabled in the "Plugin Options" for this module)

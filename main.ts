@@ -9,6 +9,8 @@ const GS_OBSIDIAN_FOLDER = "assetsLocation";
 const GS_FOLDER_NOTES = "createFolderNotes";
 const GS_SHOW_RIBBON = "showRibbon";
 
+const FRONTMATTER = "---\n";
+
 /**
  * This relies in File.prototype.path, which exists in the Obsidian.md/Electron environment, but not in other browsers!
  */
@@ -167,7 +169,7 @@ export default class ImportFoundry extends Plugin {
 				// Delete old note if it already exists
 				await deleteIfExists(this.app, notepath);
 
-				let foldernote = "```\n" + `title: "${folder.name}"\n` + `aliases: "${folder.name}"\n` + "```\n" + `# ${folder.name}\n`;
+				let foldernote = FRONTMATTER + `title: "${folder.name}"\n` + `aliases: "${folder.name}"\n` + FRONTMATTER + `# ${folder.name}\n`;
 				await this.app.vault.create(notepath, foldernote);
 			}
 		}
@@ -193,7 +195,7 @@ export default class ImportFoundry extends Plugin {
 			let markdown:string = this.convertHtml(obj.content);
 			// Put ID into frontmatter (for later imports)
 			if (markdown) {
-				markdown = "```\n" + `title: "${obj.name}"\n` + `aliases: "${obj.name}"\n` + `foundryId: journal-${obj._id}\n` + "```\n" + markdown;
+				markdown = FRONTMATTER + `title: "${obj.name}"\n` + `aliases: "${obj.name}"\n` + `foundryId: journal-${obj._id}\n` + FRONTMATTER + markdown;
 			}
 			obj.markdown = markdown;
 			entries.push(obj);
