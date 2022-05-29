@@ -1,3 +1,6 @@
+# 0.7.2
+Adds an error handler around the conversion being done by the Turndown library to avoid the import stopping prematurely.
+
 # 0.7.1
 Frontmatter of each note should be surrounded by --- not ```
 
