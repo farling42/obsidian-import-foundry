@@ -192,12 +192,19 @@ export default class ImportFoundry extends Plugin {
 		for (let obj of journaldb) {
 			obj.filename = this.validFilename(obj.name);
 
-			let markdown:string = this.convertHtml(obj.content);
-			// Put ID into frontmatter (for later imports)
-			if (markdown) {
-				markdown = FRONTMATTER + `title: "${obj.name}"\n` + `aliases: "${obj.name}"\n` + `foundryId: journal-${obj._id}\n` + FRONTMATTER + markdown;
+			let markdown:string;
+			if (obj.content)
+			{
+				try {
+					markdown = this.convertHtml(obj.content);
+				}
+				catch (err) {
+					console.error(`Turndown failed to convert HTML to Markdown:\n${err.message}\n${obj.content}`);
+					notice.setMessage(`Error during import of ${obj.name}`);
+				}
 			}
-			obj.markdown = markdown;
+			// Put ID into frontmatter (for later imports)
+			obj.markdown = FRONTMATTER + `title: "${obj.name}"\n` + `aliases: "${obj.name}"\n` + `foundryId: journal-${obj._id}\n` + FRONTMATTER + (markdown || "");
 			entries.push(obj);
 		}
 		const map = new Map<string,string>();
