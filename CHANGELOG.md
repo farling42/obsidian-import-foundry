@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.8.1
+
+- Generate a console warning if the parent for a journal entry/page is not found in the list of available folders.
+
 ## 0.8.0
 
 - Support Foundry V10 (as well as V9) journal formats. Any V10 journal with a single page will generate a single page as done for V9. Any V10 journal with more than one page will have a parent folder created for the journal, and each page created as a note within that folder.

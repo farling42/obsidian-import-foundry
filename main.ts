@@ -218,6 +218,7 @@ export default class ImportFoundry extends Plugin {
 		for (let journal of journaldb) {
 
 			if (journal.pages) {
+				// Foundry V10+
 				let onepage = journal.pages.length===1;
 
 				// TOC for the main journal entry
@@ -266,6 +267,7 @@ export default class ImportFoundry extends Plugin {
 				}
 
 			} else {
+				// Foundry V9-
 				let markdown:string;
 				if (journal.content)
 				{
@@ -399,7 +401,8 @@ export default class ImportFoundry extends Plugin {
 		// Each line in the file is a separate JSON object.
 		for (const item of entries) {
 			// Write markdown to a file with the name of the Journal Entry
-			let path = item.parent ? folders.get(item.parent).fullpath : (topfoldername + '/');
+			if (item.parent && !folders.has(item.parent)) console.warn(`Journal '${item.filename}' has invalid Parent '${item.parent}'`)
+			let path = folders.get(item.parent)?.fullpath || (topfoldername + '/');
 			let outfilename = path + item.filename + '.md';
 
 			// Since we can't overwrite, delete the file if it already exists.
