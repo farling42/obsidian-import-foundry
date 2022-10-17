@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, htmlToMarkdown, AbstractTextComponent } from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, htmlToMarkdown, AbstractTextComponent, ItemView } from 'obsidian';
 import * as fs from 'fs/promises';
 import * as Electron from 'electron';  // to gain definition for File.prototype.path for Typescript
 
@@ -25,6 +25,13 @@ const DEFAULT_SETTINGS: ImportFoundrySettings = {
 	[GS_OBSIDIAN_FOLDER]: "FoundryImport",
 	[GS_FOLDER_NOTES]: false,
 	[GS_SHOW_RIBBON]: true
+}
+
+interface FolderDetails {
+	name: string;
+	filename: string;
+	parent: string;
+	fullpath: string;
 }
 
 export default class ImportFoundry extends Plugin {
@@ -130,7 +137,7 @@ export default class ImportFoundry extends Plugin {
 			new Notice(`File ${sourcepath} is empty`);
 			return;
 		}
-		let notice = new Notice(`Starting import`, 0);
+		let mynotice = new Notice(`Starting import`, 0);
 		// Create folder notes if we have the folder notes plugin enabled.
 		this.create_folder_notes = createFolderNotes;
 
@@ -140,14 +147,34 @@ export default class ImportFoundry extends Plugin {
 		// Read the folders DB.
 		let folderdb = await this.readDB(sourcepath.replace("journal.db","folders.db"));
 
+		// Read the Journal DB
+		let journaldb = await this.readDB(file);
+		if (!journaldb) return;
+
 		// Get all the base folders (for Journal Entries only) into a map,
 		// this is required so we can track the .parent to determine the full path
-		let folders = new Map<string,any>();
+		let folders = new Map<string,FolderDetails>();
 		for (let folder of folderdb) {
 			if (folder.type != 'JournalEntry') continue;
-			folder.filename = this.validFilename(folder.name);
-			folders.set(folder._id, folder);
+			folders.set(folder._id, {
+				name    : folder.name,
+				parent  : folder.folder,	// Foundry._id
+				filename: this.validFilename(folder.name),
+				fullpath: "",
+			});
 		}
+		// A folder for each journal from Foundry V10 (that has more than 1 page)
+		for (let journal of journaldb) {
+			if (journal.pages?.length > 1) {
+				folders.set(journal._id, {
+					name    : journal.name,
+					parent  : journal.folder,	// Foundry._id
+					filename: this.validFilename(journal.name),
+					fullpath: "",
+				});	
+			}
+		}
+		// folders().filename fully set BEFORE starting the next loop
 		
 		for (let folder of folders.values()) {
 			let fullpath = folder.filename;
@@ -164,6 +191,7 @@ export default class ImportFoundry extends Plugin {
 					console.error(`Failed to create folder: '${fullpath}' due to ${err}`)
 			});
 			folder.fullpath = fullpath + '/';
+
 			if (this.create_folder_notes) {
 				let notepath = folder.fullpath + folder.filename + ".md";
 				// Delete old note if it already exists
@@ -181,39 +209,93 @@ export default class ImportFoundry extends Plugin {
 			markdown: string;
 			// The following are from the JSON.parse decoding.
 			_id: string;
-			folder: string;
+			parent: string;
 		}
 		
-		// Read the Journal DB
-		let journaldb = await this.readDB(file);
-		if (!journaldb) return;
-
 		let entries : FoundryEntry[] = [];
-		for (let obj of journaldb) {
-			obj.filename = this.validFilename(obj.name);
+		const idmap = new Map<string,string>();
 
-			let markdown:string;
-			if (obj.content)
-			{
-				try {
-					markdown = this.convertHtml(obj.content);
+		for (let journal of journaldb) {
+
+			if (journal.pages) {
+				let onepage = journal.pages.length===1;
+
+				// TOC for the main journal entry
+				if (!onepage) {
+					let markdown = "## Table of Contents\n";
+					for (let page of journal.pages) {
+						markdown += `\n- [[${this.validFilename(page.name)}]]`;
+					}
+					entries.push({
+						_id      : journal._id,
+						filename : this.validFilename(journal.name),
+						parent   : journal._id,  // This is a Folder note, so goes INSIDE the folder for this journal entry
+						markdown : FRONTMATTER + `title: "${journal.name}"\n` + `aliases: "${journal.name}"\n` + `foundryId: journal-${journal._id}\n` + FRONTMATTER + markdown,
+					});
 				}
-				catch (err) {
-					console.error(`Turndown failed to convert HTML to Markdown:\n${err.message}\n${obj.content}`);
-					notice.setMessage(`Error during import of ${obj.name}`);
+				// Ensure there is a mapping for journal ID, regardless of how the pages are managed.
+				idmap.set(journal._id, this.validFilename(journal.name));
+
+				for (let page of journal.pages) {
+					let markdown:string;
+					let pagename  = onepage ? journal.name : page.name;
+					switch (page.type) {
+						case "text":
+							switch (page.text.format) {
+								case 1:	markdown = this.convertHtml(page.text.content); break;  // HTML
+								case 2: markdown = page.text.markdown; break;  // MARKDOWN
+							}
+							break;
+						case "image":
+						case "pdf":
+						case "video":
+							// page.src = path to image or PDF
+							if (page.src) markdown = `![](${page.src})`;
+							break;
+					}
+					let pageid = journal._id + '.JournalEntryPage.' + page._id;
+					markdown = FRONTMATTER + `title: "${pagename}"\n` + `aliases: "${pagename}"\n` + `foundryId: journal-${pageid}\n` + FRONTMATTER + (markdown || "");
+					let filename = this.validFilename(pagename);
+					entries.push({
+						_id      : pageid,
+						filename : filename,
+						parent   : onepage ? journal.folder : journal._id,  // parent folder = the Journal main page
+						markdown : markdown
+					});
+					idmap.set(pageid, filename);
 				}
+
+			} else {
+				let markdown:string;
+				if (journal.content)
+				{
+					try {
+						markdown = this.convertHtml(journal.content);
+					}
+					catch (err) {
+						console.error(`Turndown failed to convert HTML to Markdown:\n${err.message}\n${journal.content}`);
+						mynotice.setMessage(`Error during import of ${journal.name}`);
+					}
+				}
+				// Put ID into frontmatter (for later imports)
+				markdown = FRONTMATTER + `title: "${journal.name}"\n` + `aliases: "${journal.name}"\n` + `foundryId: journal-${journal._id}\n` + FRONTMATTER + (markdown || "");
+				const filename = this.validFilename(journal.name);
+				entries.push({
+					_id      : journal._id,
+					filename : filename,
+					parent   : journal.folder,
+					markdown : markdown,
+				});
+				idmap.set(journal._id, filename);
 			}
-			// Put ID into frontmatter (for later imports)
-			obj.markdown = FRONTMATTER + `title: "${obj.name}"\n` + `aliases: "${obj.name}"\n` + `foundryId: journal-${obj._id}\n` + FRONTMATTER + (markdown || "");
-			entries.push(obj);
-		}
-		const map = new Map<string,string>();
-		for (let item of entries) {
-			map.set(item._id, item.filename);
 		}
 		
 		function convert(str:string, id:string, label:string) {
-			let filename = map.get(id);
+			// remove section from id
+			let section = id.indexOf('#');
+			if (section>0) id = id.slice(0,section);
+
+			let filename = idmap.get(id);
 			if (label == filename)
 				return `[[${filename}]]`;
 			else
@@ -243,7 +325,7 @@ export default class ImportFoundry extends Plugin {
 				console.log(`Ignoring image file/external URL in '${currententry}':\n${filename}`);
 				return str;
 			}
-			filename = filename.replaceAll('%20', ' ');
+			filename = decodeURIComponent(filename);
 			// filename = "worlds/cthulhu/realmworksimport/sdfdsfrs.png"
 			// basename = ".../worlds/cthulhu/data/journal.db"
 			let basefilename = filename.slice(filename.lastIndexOf('/') + 1);
@@ -259,11 +341,23 @@ export default class ImportFoundry extends Plugin {
 		for (let item of entries) {
 			// Replace Journal Links
 			if (item.markdown.includes('@JournalEntry')) {
+				// The square brackets in @JournalEntry will already have been escaped! if text was converted to markdown
+				const pattern1 = /@JournalEntry\\\[([^\]]*)\\\]{([^\}]*)}/g;
+				item.markdown = item.markdown.replaceAll(pattern1, convert);
+				// Foundry V10 allows markdown, which won't have escaped markers
+				const pattern2 = /@JournalEntry\[([^\]]*)\]{([^\}]*)}/g;
+				item.markdown = item.markdown.replaceAll(pattern2, convert);
+			}
+			// Converted text has the first [ escaped
+			if (item.markdown.includes('@UUID\\[JournalEntry.')) {
 				// The square brackets in @JournalEntry will already have been escaped!
-				const pattern = /@JournalEntry\\\[([^\]]*)\\\]{([^\}]*)}/g;
-				//console.log(`Replacing @JournalEntry in\n${item.markdown}`);
+				const pattern = /@UUID\\\[JournalEntry\.([^\]]*)\\\]{([^\}]*)}/g;
 				item.markdown = item.markdown.replaceAll(pattern, convert);
-				//console.log(`Replaced @JournalEntry to became\n${item.markdown}`);
+			}
+			// Converted markdown does NOT include the escape flag
+			if (item.markdown.includes('@UUID[JournalEntry.')) {
+				const pattern = /@UUID\[JournalEntry\.([^\]]*)\]{([^\}]*)}/g;
+				item.markdown = item.markdown.replaceAll(pattern, convert);
 			}
 			// Replace file references
 			if (item.markdown.includes('![](')) {
@@ -286,7 +380,7 @@ export default class ImportFoundry extends Plugin {
 		this.saveSettings();
 
 		// Move all the files that fileconvert found (if any)
-		notice.setMessage('Transferring image/binary files');
+		mynotice.setMessage('Transferring image/binary files');
 		for (let item of filestomove) {
 			// await required to avoid ENOENT error (too many copies/writes)
 			let body = await fs.readFile(item.srcfile).catch(err => { console.error(`Failed to read ${item.srcfile} from '${item.entryName}' due to ${err}`); return null});
@@ -305,17 +399,17 @@ export default class ImportFoundry extends Plugin {
 		// Each line in the file is a separate JSON object.
 		for (const item of entries) {
 			// Write markdown to a file with the name of the Journal Entry
-			let path = item.folder ? folders.get(item.folder).fullpath : (topfoldername + '/');
+			let path = item.parent ? folders.get(item.parent).fullpath : (topfoldername + '/');
 			let outfilename = path + item.filename + '.md';
 
 			// Since we can't overwrite, delete the file if it already exists.
 			await deleteIfExists(this.app, outfilename);
 			
-			notice.setMessage(`Importing\n${item.filename}`);
+			mynotice.setMessage(`Importing\n${item.filename}`);
 			await this.app.vault.create(outfilename, item.markdown)
 				.catch(err => new Notice(`Creating Note for ${item.filename} failed due to ${err}`));
 		}
-		notice.setMessage("Import Finished");
+		mynotice.setMessage("Import Finished");
 	}
 }
 
