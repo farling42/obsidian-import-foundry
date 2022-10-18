@@ -1,6 +1,6 @@
 {
 	"name": "import_foundry_vtt_journal_entries",
-	"version": "0.8.1",
+	"version": "0.8.2",
 	"description": "Imports your journal entries from your selected Foundry VTT world into Obsidian.md",
 	"main": "main.js",
 	"scripts": {

@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.8.2
+
+- Prevent import stopping if a V10 journal page has no content.
+
 ## 0.8.1
 
 - Generate a console warning if the parent for a journal entry/page is not found in the list of available folders.

@@ -119,7 +119,12 @@ export default class ImportFoundry extends Plugin {
 			this.turndownService.use(this.gfm);
 		}
 
-		let markdown:string = this.turndownService.turndown(html);
+		let markdown:string;
+		try {
+			markdown = this.turndownService.turndown(html);
+		} catch (error) {
+			console.log(`Error: failed to decode html:\n${html}`)
+		}
 
 		return markdown;
 	}
@@ -243,8 +248,19 @@ export default class ImportFoundry extends Plugin {
 					switch (page.type) {
 						case "text":
 							switch (page.text.format) {
-								case 1:	markdown = this.convertHtml(page.text.content); break;  // HTML
-								case 2: markdown = page.text.markdown; break;  // MARKDOWN
+								case 1:	// HTML
+									if (page.text.content) {
+										try {
+											markdown = this.convertHtml(page.text.content); 
+										} catch (err) {
+											console.error(`Turndown failed to convert HTML to Markdown:\n${err.message}\n${journal.content}`);
+											mynotice.setMessage(`Error during import of ${journal.name}`);
+										}
+									}
+									break;
+								case 2: // MARKDOWN
+									markdown = page.text.markdown;
+									break;
 							}
 							break;
 						case "image":
