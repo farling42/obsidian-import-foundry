@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.8.3
+
+- Add extra progress messages for people with LARGE foundry journal DBs (e.g. 1,000s of entries).
+
 ## 0.8.2
 
 - Prevent import stopping if a V10 journal page has no content.

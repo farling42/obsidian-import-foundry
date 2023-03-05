@@ -97,7 +97,7 @@ export default class ImportFoundry extends Plugin {
 		let contents = 
 			(typeof dbfile == "string")
 			? await fs.readFile(dbfile, /*options*/ {encoding: 'utf-8'}).catch(err => console.error(`Failed to read file ${dbfile} due to ${err}`))
-			: await dbfile.text().catch(err => console.error(`Failed to read file ${dbfile} due to ${err}`));
+			: await dbfile.text().catch((err:Error) => console.error(`Failed to read file ${dbfile} due to ${err}`));
 
 		if (!contents) return undefined;
 
@@ -123,7 +123,7 @@ export default class ImportFoundry extends Plugin {
 		try {
 			markdown = this.turndownService.turndown(html);
 		} catch (error) {
-			console.log(`Error: failed to decode html:\n${html}`)
+			console.warn(`Error: failed to decode html:`, html)
 		}
 
 		return markdown;
@@ -133,7 +133,10 @@ export default class ImportFoundry extends Plugin {
 
 		async function deleteIfExists(app:any, filename:string) {
 			let exist = app.vault.getAbstractFileByPath(filename);
-			if (exist) await app.vault.delete(exist).catch(err => console.log(`Failed to delete ${filename} due to ${err}`));
+			if (exist) {
+				console.debug(`Deleting existing folder ${filename}`)
+				await app.vault.delete(exist).catch((err:Error) => console.log(`Failed to delete ${filename} due to ${err}`));
+			}
 		}
 
 		let sourcepath=file.path;   // File#path is an extension provided by the Electron browser
@@ -158,6 +161,7 @@ export default class ImportFoundry extends Plugin {
 
 		// Get all the base folders (for Journal Entries only) into a map,
 		// this is required so we can track the .parent to determine the full path
+		mynotice.setMessage('Reading Foundry folders')
 		let folders = new Map<string,FolderDetails>();
 		for (let folder of folderdb) {
 			if (folder.type != 'JournalEntry') continue;
@@ -169,6 +173,7 @@ export default class ImportFoundry extends Plugin {
 			});
 		}
 		// A folder for each journal from Foundry V10 (that has more than 1 page)
+		mynotice.setMessage('Getting Foundry V10 folder for each journal')
 		for (let journal of journaldb) {
 			if (journal.pages?.length > 1) {
 				folders.set(journal._id, {
@@ -180,7 +185,7 @@ export default class ImportFoundry extends Plugin {
 			}
 		}
 		// folders().filename fully set BEFORE starting the next loop
-		
+		mynotice.setMessage(`Creating ${folders.size} folders in Obsidian vault`);
 		for (let folder of folders.values()) {
 			let fullpath = folder.filename;
 			let parentid = folder.parent;
@@ -203,6 +208,7 @@ export default class ImportFoundry extends Plugin {
 				await deleteIfExists(this.app, notepath);
 
 				let foldernote = FRONTMATTER + `title: "${folder.name}"\n` + `aliases: "${folder.name}"\n` + FRONTMATTER + `# ${folder.name}\n`;
+				console.debug(`Creating folder Note for '${folder.name}' in '${notepath}'`)
 				await this.app.vault.create(notepath, foldernote);
 			}
 		}
@@ -220,6 +226,7 @@ export default class ImportFoundry extends Plugin {
 		let entries : FoundryEntry[] = [];
 		const idmap = new Map<string,string>();
 
+		mynotice.setMessage(`Reading ${journaldb.length} Foundry journals`);
 		for (let journal of journaldb) {
 
 			if (journal.pages) {
@@ -356,6 +363,7 @@ export default class ImportFoundry extends Plugin {
 		}
 		
 		// Replace @JournalEntry\[id\]{label} with [[filename-for-id]](label)
+		mynotice.setMessage(`Replacing links in ${entries.length} new entries`);
 		for (let item of entries) {
 			// Replace Journal Links
 			if (item.markdown.includes('@JournalEntry')) {
@@ -415,6 +423,7 @@ export default class ImportFoundry extends Plugin {
 		}
 		
 		// Each line in the file is a separate JSON object.
+		mynotice.setMessage(`Creating $[entries.length} Obsidian Notes`);
 		for (const item of entries) {
 			// Write markdown to a file with the name of the Journal Entry
 			if (item.parent && !folders.has(item.parent)) console.warn(`Journal '${item.filename}' has invalid Parent '${item.parent}'`)
