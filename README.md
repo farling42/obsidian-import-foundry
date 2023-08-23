@@ -4,6 +4,9 @@
 ![GitHub License](https://img.shields.io/github/license/farling42/obsidian-import-foundry)
 ![Latest Release Download Count](https://img.shields.io/github/downloads/farling42/obsidian-import-foundry/latest/main.js)
 
+## Foundry V11
+
+If you are using Foundry V11 or later, then you should use my "Markdown Exporter" module within Foundry to generate a ZIP file containing your new Obsidian vault files. It is available at https://github.com/farling42/fvtt-export-markdown 
 
 ## Foundry Journal Importer
 
